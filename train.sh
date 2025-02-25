@@ -1,0 +1,11 @@
+torchrun --nproc_per_node=8 train_shapenet.py \
+  --model_name_or_path Qwen/Qwen2.5-0.5B \
+  --dataset_path shapenet_octrees_list.json \
+  --output_dir ./qwen2-shapenet-fsdp \
+  --num_train_epochs 3 \
+  --per_device_train_batch_size 32 \
+  --gradient_accumulation_steps 1 \
+  --fsdp "full_shard" \
+  --fsdp_transformer_layer_cls_to_wrap "QWenBlock" \
+  --learning_rate 2e-4 \
+  --bf16 True
