@@ -1,3 +1,91 @@
+# ShapeNet Octree Training with LlamaFactory
+
+Here's a documentation section for your README that explains how to use the `create_shapenet.py` script:
+
+### Training a Model on ShapeNet Octree Data
+
+This repository includes a script to prepare ShapeNet octree data for training with LlamaFactory. The script processes ShapeNet data into the format expected by LlamaFactory, adds special tokens for octree representation, and creates the necessary configuration files.
+
+### Prerequisites
+
+- Python 3.8+
+- LlamaFactory installed (`pip install llamafactory`)
+- Transformers library (`pip install transformers`)
+- ShapeNet octree data in JSON format
+
+### Preparing and Training
+
+1. **Prepare your ShapeNet data**:
+   Your ShapeNet data should be in a JSON file with the following structure:
+   ```json
+   [
+     {
+       "caption": "A description of the 3D shape",
+       "octree": [[0, 1, 2, ...], [4, 5, 6, ...], ...]
+     },
+     ...
+   ]
+   ```
+   Each octree is represented as a list of levels, where each level contains integer values (0-255).
+
+2. **Run the preparation script**:
+   ```bash
+   python create_shapenet.py --shapenet_path path/to/shapenet_octrees_list.json --output_dir ./data --model_name Qwen/Qwen2.5-0.5B-Instruct
+   ```
+
+   Options:
+   - `--shapenet_path`: Path to your ShapeNet JSON file (default: `shapenet_octrees_list.json`)
+   - `--output_dir`: Directory to save processed data (default: `./data`)
+   - `--model_name`: Base model to use (default: `Qwen/Qwen2.5-0.5B-Instruct`)
+   - `--sep_token`: Token to separate octree levels (default: `[SEP]`)
+   - `--info_path`: Path to LlamaFactory's dataset_info.json (default: `data/dataset_info.json`)
+
+3. **Start training**:
+   After the script completes, it will output a command to start training:
+   ```bash
+   llamafactory-cli train data/shapenet_config.yaml
+   ```
+
+4. **Other training settings**:
+    You can modify the training settings in the `data/shapenet_config.yaml` file and run the training command again without running the preparation script again.
+
+### What the Script Does
+
+1. Processes ShapeNet data into LlamaFactory's conversation format
+2. Creates train/validation splits
+3. Downloads the base model and tokenizer
+4. Adds special tokens for octree representation:
+   - A separator token `[SEP]` between octree levels
+   - 256 tokens (`<octree_000>` to `<octree_255>`) for octree values
+5. Creates a YAML configuration file for LlamaFactory
+6. Updates LlamaFactory's dataset registry
+
+### Output
+
+- Processed dataset in `data/shapenet_dataset/`
+- Updated tokenizer and model in `./local_model/`
+- Training configuration in `data/shapenet_config.yaml`
+
+### Model Usage
+
+After training, your model will be able to generate octree representations from text descriptions of 3D shapes. To use it:
+
+```bash
+python inference.py --weights_path saves/model_name/checkpoint-1000 --text "a white rectangular box with a hole in the center made of transparent material."
+```
+
+Options:
+- `--weights_path`: Path to either LoRA weights or full model checkpoint
+- `--use_lora`: Flag to indicate if the weights are LoRA weights (default: False)
+- `--base_model`: Base model name (default: "Qwen/Qwen2.5-0.5B-Instruct") (only used if `--use_lora` is True so lora weights can be applied on top of the base model)
+- `--text`: Text description of the 3D shape to generate (if not provided, enters interactive mode)
+
+
+----
+
+
+
+
 ![# LLaMA Factory](assets/logo.png)
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/hiyouga/LLaMA-Factory?style=social)](https://github.com/hiyouga/LLaMA-Factory/stargazers)

@@ -127,23 +127,36 @@ def main():
         help="Base model name (default: Qwen/Qwen2.5-0.5B-Instruct)",
     )
 
+    parser.add_argument(
+        "--text",
+        type=str,
+        default="",
+        help="Text description of the 3D shape to generate",
+    )
+
     args = parser.parse_args()
 
     # Load model
     print("Loading model...")
     model, tokenizer = load_model(args.base_model, args.weights_path, args.use_lora)
 
-    # Interactive loop
-    print("\nEnter text descriptions (or 'quit' to exit):")
-    while True:
-        text = input("\nDescription: ").strip()
-        if text.lower() == "quit":
-            break
-
-        print("Generating octree...")
-        octree = generate_octree(model, tokenizer, text)
+    if args.text == "":
+        # Interactive loop
+        print("\nEnter text descriptions (or 'quit' to exit):")
+        while True:
+            text = input("\nDescription: ").strip()
+            if text.lower() == "quit":
+                break
+            print("Generating octree...")
+            octree = generate_octree(model, tokenizer, text)
+            print("\nGenerated Octree:")
+            print(octree)
+    else:
+        octree = generate_octree(model, tokenizer, args.text)
         print("\nGenerated Octree:")
         print(octree)
+
+    return octree
 
 
 if __name__ == "__main__":
