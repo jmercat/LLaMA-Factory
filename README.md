@@ -12,6 +12,7 @@ This repository includes a script to prepare ShapeNet octree data for training w
 - LlamaFactory installed (`pip install llamafactory`)
 - Transformers library (`pip install transformers`)
 - ShapeNet octree data in JSON format
+- (Optional for visualization) Open3D library (`pip install open3d`)
 
 ### Preparing and Training
 
@@ -79,11 +80,26 @@ Options:
 - `--use_lora`: Flag to indicate if the weights are LoRA weights (default: False)
 - `--base_model`: Base model name (default: "Qwen/Qwen2.5-0.5B-Instruct") (only used if `--use_lora` is True so lora weights can be applied on top of the base model)
 - `--text`: Text description of the 3D shape to generate (if not provided, enters interactive mode)
+- `--visualize`: Flag to visualize the generated octree
+- `--octree`: Directly visualize an existing octree string without generating a new one
+- `--output_image`: Path to save visualization image instead of displaying it
 
+### Visualization Only
 
-----
+If you already have an octree and just want to visualize it:
+```bash
+python inference.py --octree "[[255], [192, 192, 48, 48, 12, 12, 3, 3], [128, 192, 192, 192, 32, 48, 48, 48, 8, 12, 12, 12, 2, 3, 3, 3], [170, 63, 191, 252, 212, 192, 234, 170, 207, 239, 243, 113, 48, 186, 170, 243, 251, 207, 77, 12, 174, 170, 252, 254, 63, 23, 3, 171]]"
+```
 
+### Interactive Mode
 
+For interactive testing with multiple prompts:
+```bash
+python inference.py --weights_path saves/model_name/checkpoint-1000 --visualize
+```
+This will start an interactive session where you can enter text descriptions and see the generated octrees and their visualizations.
+
+------
 
 
 ![# LLaMA Factory](assets/logo.png)

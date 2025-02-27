@@ -136,7 +136,7 @@ finetuning_type: full
 dataset: shapenet_train
 eval_dataset: shapenet_val
 template: chatml
-cutoff_len: 2048
+cutoff_len: 32768
 overwrite_cache: true
 preprocessing_num_workers: 4
 
