@@ -124,7 +124,12 @@ def draw_voxel(ax, x, y, z, size, color):
     ax.add_collection3d(collection)
 
 
-def load_model(base_model_name, weights_path, use_lora=True):
+def load_model(
+    base_model_name,
+    weights_path,
+    use_lora=True,
+    use_vllm=True,
+):
     """
     Load the model with either LoRA weights or full model weights.
 
@@ -132,8 +137,58 @@ def load_model(base_model_name, weights_path, use_lora=True):
         base_model_name: Name of the base model
         weights_path: Path to either LoRA weights or full model checkpoint
         use_lora: If True, load as LoRA weights. If False, load as full checkpoint
+        use_vllm: If True, use vLLM for faster inference (default)
     """
-    # Load base model and tokenizer
+    if use_vllm:
+        # Import vLLM for faster inference
+        try:
+            from vllm import LLM, SamplingParams
+
+            # Load model using vLLM
+            if use_lora:
+                # For LoRA models, we need to merge weights first
+                print("Loading base model with LoRA weights...")
+                model_temp = AutoModelForCausalLM.from_pretrained(
+                    base_model_name,
+                    trust_remote_code=True,
+                    torch_dtype=torch.float16,
+                    device_map="auto",
+                )
+                model_temp = PeftModel.from_pretrained(model_temp, weights_path)
+                model_temp = model_temp.merge_and_unload()
+                # Save merged model to temp dir
+                import tempfile
+
+                with tempfile.TemporaryDirectory() as tmpdirname:
+                    model_temp.save_pretrained(tmpdirname)
+                    tokenizer = AutoTokenizer.from_pretrained(
+                        weights_path, trust_remote_code=True
+                    )
+                    tokenizer.save_pretrained(tmpdirname)
+                    # Load with vLLM
+                    model = LLM(
+                        model=tmpdirname,
+                        trust_remote_code=True,
+                        tensor_parallel_size=torch.cuda.device_count(),
+                    )
+            else:
+                # Load directly with vLLM
+                model = LLM(
+                    model=weights_path,
+                    trust_remote_code=True,
+                    tensor_parallel_size=torch.cuda.device_count(),
+                )
+                tokenizer = AutoTokenizer.from_pretrained(
+                    weights_path, trust_remote_code=True
+                )
+
+            return model, tokenizer
+        except ImportError:
+            print("vLLM not installed. Falling back to standard loading.")
+            print("For faster inference, install vLLM: pip install vllm")
+            use_vllm = False
+
+    # Standard loading path (if vLLM is not used or not available)
     tokenizer = AutoTokenizer.from_pretrained(weights_path, trust_remote_code=True)
 
     if use_lora:
@@ -163,7 +218,7 @@ def decode_octree(octree):
     Take in a string of octree tokens and decode it into a list of list of integers
     """
     # Remove anything that is not <octree_n> or [SEP]
-    octree = octree.split("\n")[2].replace("<|im_end|>", "")
+    octree = octree.split("\n")[-1].replace("<|im_end|>", "")
     # Convert <octree_n> to list of n
     octree = octree.replace("<octree_", "").replace(">", ",")
     octree = octree.split("[SEP]")
@@ -174,7 +229,7 @@ def decode_octree(octree):
     return octree
 
 
-def generate_octree(model, tokenizer, text_prompt):
+def generate_octree(model, tokenizer, text_prompt, use_vllm=True):
     """Generate an octree representation for a given text description."""
     # Create a conversation in the same format used during training
     messages = [
@@ -189,24 +244,38 @@ def generate_octree(model, tokenizer, text_prompt):
         messages, tokenize=False, add_generation_prompt=True
     )
 
-    # Encode the prompt
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    # Handle vLLM generation
+    if use_vllm:
+        from vllm import SamplingParams
 
-    # Generate
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            pad_token_id=tokenizer.pad_token_id,
-            use_cache=True,
-            max_new_tokens=9000,
-            temperature=0.0,  # Adjust for more/less randomness
-            do_sample=False,
-            top_p=0.9,
-            top_k=50,
+        sampling_params = SamplingParams(
+            temperature=0.0, max_tokens=9000, top_p=0.9, top_k=50
         )
 
-    # Decode the response
-    response = tokenizer.decode(outputs[0], skip_special_tokens=False)
+        outputs = model.generate(prompt, sampling_params)
+        response = tokenizer.decode(
+            outputs[0].outputs[0].token_ids, skip_special_tokens=False
+        )
+    else:
+        # Standard generation path
+        # Encode the prompt
+        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
+        # Generate with optimized parameters
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                pad_token_id=tokenizer.pad_token_id,
+                use_cache=True,
+                max_new_tokens=9000,
+                temperature=0.0,  # Adjust for more/less randomness
+                do_sample=False,
+                top_p=0.9,
+                top_k=50,
+            )
+
+        # Decode the response
+        response = tokenizer.decode(outputs[0], skip_special_tokens=False)
 
     # Extract just the assistant's response
     # This depends on the specific chat template, but we can use a more robust approach
@@ -217,8 +286,8 @@ def generate_octree(model, tokenizer, text_prompt):
     if user_prompt in response:
         octree = response[response.find(user_prompt) + len(user_prompt) :].strip()
     else:
-        # Fallback: just return everything after the input prompt
-        octree = response[len(prompt) :].strip()
+        # Fallback: just return everything
+        octree = response.strip()
 
     decoded_octree = decode_octree(octree)
     return decoded_octree
@@ -275,6 +344,11 @@ def main():
         default=6,
         help="Maximum level of detail to generate",
     )
+    parser.add_argument(
+        "--no_vllm",
+        action="store_true",
+        help="Disable vLLM for inference (vLLM is used by default)",
+    )
 
     args = parser.parse_args()
 
@@ -286,7 +360,12 @@ def main():
     # Load model for generation
     if args.text != "" or args.text == "" and args.octree is None:
         print("Loading model...")
-        model, tokenizer = load_model(args.base_model, args.weights_path, args.use_lora)
+        model, tokenizer = load_model(
+            args.base_model,
+            args.weights_path,
+            args.use_lora,
+            not args.no_vllm,  # Use vLLM by default unless --no_vllm is specified
+        )
 
         if args.text == "":
             # Interactive loop
@@ -297,7 +376,7 @@ def main():
                     if text.lower() == "quit":
                         break
                     print("Generating octree...")
-                    octree = generate_octree(model, tokenizer, text)
+                    octree = generate_octree(model, tokenizer, text, not args.no_vllm)
                     print("\nGenerated Octree:")
                     print(octree)
 
@@ -308,21 +387,20 @@ def main():
                         try:
                             octree = octree[: lod + 1]
                             # Visualize if requested
-                            if args.visualize:
-                                print("Visualizing octree...")
-                                if args.output_image:
-                                    name = (
-                                        text.replace(" ", "_")
-                                        .replace(".", "")
-                                        .replace(",", "")
-                                    )
-                                    output_image = os.path.join(
-                                        args.output_image, f"{name}.png"
-                                    )
-                                else:
-                                    output_image = None
-                                visualize_octree(str(octree), output_image)
-                                success = True
+                            print("Visualizing octree...")
+                            if args.output_image:
+                                name = (
+                                    text.replace(" ", "_")
+                                    .replace(".", "")
+                                    .replace(",", "")
+                                )
+                                output_image = os.path.join(
+                                    args.output_image, f"{name}.png"
+                                )
+                            else:
+                                output_image = None
+                            visualize_octree(str(octree), output_image)
+                            success = True
                         except Exception as e:
                             print(f"Error at lod {lod}: {e}")
                             success = False
@@ -330,7 +408,7 @@ def main():
                 except Exception as e:
                     print(f"Error: {e}")
         else:
-            octree = generate_octree(model, tokenizer, args.text)
+            octree = generate_octree(model, tokenizer, args.text, not args.no_vllm)
             print("\nGenerated Octree:")
             print(octree)
 
@@ -351,8 +429,9 @@ def main():
                         output_image = os.path.join(args.output_image, f"{name}.png")
                     else:
                         output_image = None
-                        visualize_octree(str(octree), output_image)
-                        success = True
+
+                    visualize_octree(str(octree), output_image)
+                    success = True
                 except Exception as e:
                     print(f"Error at lod {lod}: {e}")
                     success = False

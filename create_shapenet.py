@@ -131,6 +131,11 @@ finetuning_type: full
 # lora_dropout: 0.1
 # lora_target: all
 # train_embedding: true  # This is crucial for training the new token embeddings
+# use_unsloth: true  # Speed up LoRA tuning significantly
+
+### speed optimizations
+flash_attn: fa2  # Use FlashAttention-2 for faster training
+enable_liger_kernel: true  # Enable efficient kernel implementation
 
 ### dataset
 dataset: shapenet_train
